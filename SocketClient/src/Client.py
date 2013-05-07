@@ -17,4 +17,4 @@ if __name__ == "__main__":
     ip, port = "127.0.0.1", 53758
     
     for i in range(1, 31):
-        client(ip, port, "Request# " + str(i))
+        client(ip, port, "Client Request# " + str(i))
