@@ -1,15 +1,13 @@
 import threading
 import SocketServer
 import Queue
+import socket
 
 devlist_pairinfo = 0
 devlist_connected = 1
 devlist_isalive = 2
-devlist_timer = 3
-devlist_lock = 4
-devlist_queue = 5
-
-TTL = 40.0
+devlist_lock = 3
+devlist_queue = 4
 
 devicelist = {}
 devicenumber_index = {}
@@ -17,9 +15,9 @@ indexlock = threading.Lock()
 
 class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
     'This handler is for handling request on server'
-    def handle(self):
+    def process(self, data):
         'This function handles the processing of the requests'
-        data = self.request.recv(1024)
+        
         paralist = data.split("#")
         
         if paralist[0] == "R":          
@@ -29,12 +27,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             isalive = True
             
             if device_name not in devicelist:
-                devicelist[device_name] = [pairing_info, connected, isalive, threading.Timer(TTL, client_die, args=[device_name]), threading.Lock()]
-                
-                try:
-                    devicelist[device_name][devlist_timer].start() 
-                except RuntimeError as e:
-                    print str(e)
+                devicelist[device_name] = [pairing_info, connected, isalive, threading.Lock()]
                 
                 indexlock.acquire()
                 devicenumber = len(devicenumber_index) + 1
@@ -57,12 +50,11 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                     else:
                         print "Some error in devicelist: [name mismatching]"
                     
-                # print"Current devlist:", devicelist
-                # print"Current devicenumber_index:", devicenumber_index
                 response = "{0} registered as {1}" .format(device_name, devicenumber)
             else:
                 response = "{0} has already been registered.".format(device_name)
         
+            return (device_name, response)
         elif paralist[0] == "D":
             sender_number = int(paralist[1])
             code = paralist[2]             
@@ -74,22 +66,20 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                 sender_name = devicenumber_index[sender_number]
 
                 if sender_name in devicelist:
-                    
-                    handle_alivesignal(sender_name)
-                    
-                    'Response'    
-                    try:
-                        response = devicelist[sender_name][devlist_queue].get(False)
-                        devicelist[sender_name][devlist_queue].task_done()
-                    except Queue.Empty:
-                        response = "No message this time"
-                                
-                    response = sender_name + ": " + response
-                    
+
                     if devicelist[sender_name][devlist_pairinfo] in devicelist:
                     
                         if devicelist[sender_name][devlist_connected] == True \
                         and devicelist[devicelist[sender_name][devlist_pairinfo]][devlist_connected] == True:
+                        
+                            'Response'    
+                            try:
+                                response = devicelist[sender_name][devlist_queue].get(False)
+                                devicelist[sender_name][devlist_queue].task_done()
+                            except Queue.Empty:
+                                response = "No message this time"
+                                
+                            response = sender_name + ": " + response
                         
                             'Send msg'
                             if code == "Send":
@@ -106,21 +96,21 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                                 print "The queue is full, try again later"
                                 
                         else:
-                            response += "\nWarning: This device is not connected."
+                            response = "Warning: This device is not connected."
                     else:
-                        response += "\nWarning: The pair information is not recorded."
+                        response = "Warning: The pair information is not recorded."
                 else:
                     response = "Error: This email appears in index list but not the devicelist."               
             else:
                 response = "Error: Didn't find this device number in system!"
+                
+            return (sender_name, response)
         elif paralist[0] == "N":
             sender_number = int(paralist[1])
             if sender_number in devicenumber_index:
                 sender_name = devicenumber_index[sender_number]
 
                 if sender_name in devicelist:                  
-                    handle_alivesignal(sender_name)
-                    
                     'Response'    
                     try:
                         response = devicelist[sender_name][devlist_queue].get(False)
@@ -133,16 +123,44 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                     response = "Error: This email appears in index list but not the devicelist."               
             else:
                 response = "Error: Didn't find this device number in system!"
+            return (sender_name, response)
         else:
-            pass          
-        
-        self.request.sendall(response)
+            response = "Error Op Code." 
+            pass         
+    
+    def handler(self):
+        running = True
+        self.request.settimeout(3600)
+        self.__devicename = "default"
+        while(running):           
+            try:
+                data = self.request.recv(1024)
+                if data == 0:
+                    if self.__devicename is not "default":
+                        client_die(self.__devicename)
+                    running = False
+                    self.request.close()
+                    print "The client closed."
+                elif data == -1:
+                    continue
+                    print "recv() error."
+                else:
+                    self.__devicename, response = self.process(data)
+                    print "request processed."
+                    self.request.sendall(response)
+            except socket.timeout as e:
+                if self.__devicename is not "default":
+                    client_die(self.__devicename)
+                running = False
+                self.request.close()
+                print "timeout error:", e.strerror
+            
         
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
     'This is Threaded TCP Server'
     pass
 
-def handle_alivesignal(devicename):
+"""def handle_alivesignal(devicename):
     'This function handles the alive signal sent by clients.'
     
     devicelist[devicename][devlist_lock].acquire()
@@ -160,7 +178,7 @@ def handle_alivesignal(devicename):
                 print "Cannot reconnect: the pair device is dead."
         else:
             print "Cannot reconnect: the pair info is not recorded."
-    devicelist[devicename][devlist_lock].release()
+    devicelist[devicename][devlist_lock].release()"""
 
 def client_die(devicename):
     'Performing operations when the server thinks this device is dead'
@@ -194,6 +212,54 @@ if __name__ == "__main__":
         server.serve_forever()    
     except KeyboardInterrupt as e:
         server.shutdown()
-        print "Server shutdown."
+        print "Server shutdown."  
+
+"""import socket
+import threading 
+import time  
+
+class Server:
     
+    def __init__(self):    
+        self.__server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.__server.bind(("localhost", 36668))
+        self.__server.listen(5)
+        
+    def process(self):
+        while(1):
+            self.__c_sock.settimeout(5)
+            try:
+                print "before recv"
+                data = self.__c_sock.recv(1024)
+                print "after recv"
+            except socket.timeout as e:
+                print "timeout error:", e.strerror
+            self.__c_sock.sendall(data)
+
+    def serve(self):
+        while(1):
+            self.__c_sock, c_address = self.__server.accept()
+            threading.Thread(target=self.process).start()
+
+class Client:
+    
+    def __init__(self):
+        self.__sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.__sock.connect(("localhost", 36668))
+        
+    def sendrecv(self, msg):
+        self.__sock.sendall(msg)
+        response = self.__sock.recv(1024)
+        print "C Recv:", response
+
+if __name__ == "__main__":
+    mserver = Server()
+    threading.Thread(target=mserver.serve).start()   
+    mclient = Client()
+    mclient.sendrecv("Sample msg")
+    
+    print "Over" """
+
+
+
     

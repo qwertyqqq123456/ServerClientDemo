@@ -5,25 +5,28 @@ import time
 
 def client(ip, port, message):
     'This function is for executing client logic'
-    randtime = randrange(0, 10)
-    time.sleep(randtime)
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((ip, port))
+    sock.setblocking(1)
+        
+    print "Current thead calling:", threading.current_thread().getName()
+    sock.connect((ip, port))      
+    sock.sendall(message)
+
     try:
-        sock.sendall(message)
         response = sock.recv(1024)
-        print"Received: {}".format(response)
+        print"Received: {0} :Thread-{1}".format(response, threading.current_thread().getName())
     finally:
-        sock.close()
+        #sock.close()
         
         
 if __name__ == "__main__":
     
-    ip, port = "54.214.53.142", 36666
+    ip, port = "54.214.136.76", 36666
     # ip, port = "localhost", 36666
     
     totalnumber = 5000
-    times = 4000
+    times = 5000
     
     for i in range(1, (totalnumber / 2) + 1):
         reg_message = "R#Client{0}#Client{1}".format(i, (i + totalnumber / 2))
@@ -34,6 +37,7 @@ if __name__ == "__main__":
 
     print "Waiting for registration to be completed...\n"
     time.sleep(40)
+    print "Now it's time to send data..."
     
     for j in range(times):
         randnumber_1 = randrange(1, totalnumber + 101)
