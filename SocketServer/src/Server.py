@@ -2,6 +2,7 @@ import threading
 import SocketServer
 import Queue
 import socket
+import time
 
 devlist_pairinfo = 0
 devlist_connected = 1
@@ -100,9 +101,11 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                     else:
                         response = "Warning: The pair information is not recorded."
                 else:
-                    response = "Error: This email appears in index list but not the devicelist."               
+                    response = "Error: This email appears in index list but not the devicelist." 
+                return (sender_name, response)              
             else:
                 response = "Error: Didn't find this device number in system!"
+                return ("default", response)
                 
             return (sender_name, response)
         elif paralist[0] == "N":
@@ -120,24 +123,28 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                                 
                     response = sender_name + ": " + response                   
                 else:
-                    response = "Error: This email appears in index list but not the devicelist."               
+                    response = "Error: This email appears in index list but not the devicelist."  
+                return (sender_name, response)             
             else:
                 response = "Error: Didn't find this device number in system!"
-            return (sender_name, response)
+                return ("default", response)
+            
         else:
             response = "Error Op Code." 
             pass         
     
-    def handler(self):
-        running = True
-        self.request.settimeout(3600)
-        self.__devicename = "default"
+    def handle(self):
+        running = True      
+        self.__devicename = ["default"]
         while(running):           
             try:
+                self.request.settimeout(3600)
                 data = self.request.recv(1024)
-                if data == 0:
-                    if self.__devicename is not "default":
-                        client_die(self.__devicename)
+                print "server recv:", data
+                # time.sleep(1)
+                if data == 0 or data == None or data == "":
+                    if self.__devicename[0] is not "default":
+                        client_die(self.__devicename[0])
                     running = False
                     self.request.close()
                     print "The client closed."
@@ -145,15 +152,17 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                     continue
                     print "recv() error."
                 else:
-                    self.__devicename, response = self.process(data)
+                    self.__devicename[0], response = self.process(data)
                     print "request processed."
                     self.request.sendall(response)
             except socket.timeout as e:
-                if self.__devicename is not "default":
-                    client_die(self.__devicename)
+                if self.__devicename[0] is not "default":
+                    client_die(self.__devicename[0])
                 running = False
                 self.request.close()
                 print "timeout error:", e.strerror
+            except socket.error as ee:
+                print "recv error:", ee.strerror
             
         
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
