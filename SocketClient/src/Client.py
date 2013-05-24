@@ -21,24 +21,24 @@ class Client:
         
 if __name__ == "__main__":
     
-    ip, port = "54.214.131.101", 36666
+    ip, port = "54.214.104.185", 36666
     # ip, port = "localhost", 36666
     
     totalnumber = 5000
     times = 5000
     c_dict = {}
     for i in range(1, (totalnumber / 2) + 1):
-        # reg_message = "R#Client{0}#Client{1}".format(i, (i + totalnumber / 2))
+        reg_message = "R#Client{0}#Client{1}".format(i, (i + totalnumber / 2))
         c_dict[i] = Client(ip, port)
-        # c_dict[i].sendrecv(reg_message)
+        c_dict[i].sendrecv(reg_message)
     for i in range((totalnumber / 2) + 1, totalnumber + 1):
-        # reg_message = "R#Client{0}#Client{1}".format(i, (i - totalnumber / 2))
+        reg_message = "R#Client{0}#Client{1}".format(i, (i - totalnumber / 2))
         c_dict[i] = Client(ip, port)
-        # c_dict[i].sendrecv(reg_message)
+        c_dict[i].sendrecv(reg_message)
 
-    # print "Waiting for registration to be completed...\n"
-    # time.sleep(1)
-    # print "Now it's time to send data..." 
+    print "Waiting for registration to be completed...\n"
+    time.sleep(1)
+    print "Now it's time to send data..." 
     
     for j in range(times):
         randnumber_1 = randrange(1, totalnumber + 101)

@@ -2,7 +2,7 @@ import threading
 import SocketServer
 import Queue
 import socket
-import time
+
 
 devlist_pairinfo = 0
 devlist_connected = 1
@@ -140,8 +140,6 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             try:
                 self.request.settimeout(3600)
                 data = self.request.recv(1024)
-                print "server recv:", data
-                # time.sleep(1)
                 if data == 0 or data == None or data == "":
                     if self.__devicename[0] is not "default":
                         client_die(self.__devicename[0])
@@ -153,6 +151,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                     print "recv() error."
                 else:
                     self.__devicename[0], response = self.process(data)
+                    handle_alivesignal(self.__devicename[0])
                     print "request processed."
                     self.request.sendall(response)
             except socket.timeout as e:
@@ -161,23 +160,16 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                 running = False
                 self.request.close()
                 print "timeout error:", e.strerror
-            except socket.error as ee:
-                print "recv error:", ee.strerror
             
         
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
     'This is Threaded TCP Server'
     pass
 
-"""def handle_alivesignal(devicename):
+def handle_alivesignal(devicename):
     'This function handles the alive signal sent by clients.'
-    
     devicelist[devicename][devlist_lock].acquire()
-    if devicelist[devicename][devlist_isalive] == True:
-        devicelist[devicename][devlist_timer].cancel()
-        devicelist[devicename][devlist_timer] = threading.Timer(TTL, client_die, args=[devicename])        
-        devicelist[devicename][devlist_timer].start()        
-    else:
+    if devicelist[devicename][devlist_isalive] == False:
         devicelist[devicename][devlist_isalive] = True
         if devicelist[devicename][devlist_pairinfo] in devicelist:
             if devicelist[devicelist[devicename][devlist_pairinfo]][devlist_isalive] == True:
@@ -187,11 +179,10 @@ class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
                 print "Cannot reconnect: the pair device is dead."
         else:
             print "Cannot reconnect: the pair info is not recorded."
-    devicelist[devicename][devlist_lock].release()"""
+    devicelist[devicename][devlist_lock].release()
 
 def client_die(devicename):
-    'Performing operations when the server thinks this device is dead'
-    
+    'Performing operations when the server thinks this device is dead'    
     devicelist[devicename][devlist_lock].acquire()   
     if devicelist[devicename][devlist_pairinfo] in devicelist:
         devicelist[devicename][devlist_connected] = False
@@ -209,8 +200,8 @@ def client_die(devicename):
 
 if __name__ == "__main__":
     
-    # HOST, PORT = "10.253.70.12", 36666
-    HOST, PORT = "localhost", 36666
+    HOST, PORT = "10.253.11.33", 36666
+    # HOST, PORT = "localhost", 36666
     
     server = ThreadedTCPServer((HOST, PORT), ThreadedTCPRequestHandler)
     ip, port = server.server_address
