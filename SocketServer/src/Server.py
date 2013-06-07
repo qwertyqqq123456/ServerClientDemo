@@ -9,19 +9,19 @@ import redis
 devlist_pairinfo = 0
 devlist_connected = 1
 devlist_isalive = 2
-devlist_lock = 3
-devlist_queue = 4
 
 # devicelist = {}
-devicenumber_index = {}
+devlocklist = {}
+queue_list = {}
 indexlock = threading.Lock()
 redis_database = redis.StrictRedis(host='localhost', port=6379, db=0)
+# redis_database.set('devicenumber', 0)
 
 def set_rvalue(redis, key, value):
     'This function stores the pickled data into redis database'
     try:
         redis.set(key, pickle.dumps(value))
-    except PicklingError:
+    except pickle.PicklingError:
         print "!!!Error: when pickling the data."
 
 def get_rvalue(redis, key):
@@ -49,14 +49,16 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             isalive = True
             
             if not redis_database.exists(device_name):
-                # devicelist[device_name] = [pairing_info, connected, isalive, threading.Lock()]
                 
-		bundled_info = [pairing_info, connected, isalive, threading.Lock()]
+		bundled_info = [pairing_info, connected, isalive]
 		set_rvalue(redis_database, device_name, bundled_info)
 		
+		if device_name not in devlocklist:
+		    devlocklist[device_name]=threading.Lock()
+
                 indexlock.acquire()
-                devicenumber = len(devicenumber_index) + 1
-                devicenumber_index[devicenumber] = device_name
+                c_devicenumber = redis_database.incr('devicenumber')
+		redis_database.set("devicenumber_index:{0}".format(c_devicenumber), device_name)
                 indexlock.release()
                 
                 if redis_database.exists(pairing_info):
@@ -64,24 +66,21 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
 		    pair_devinfo=get_rvalue(redis_database, pairing_info) 
                     if pair_devinfo[devlist_pairinfo] == device_name:
                         
-                        pair_devinfo[devlist_lock].acquire()
+                        devlocklist[pairing_info].acquire()
                         pair_devinfo[devlist_connected] = True
-                        pair_devinfo.append(Queue.Queue(5))
-                        pair_devinfo[devlist_lock].release()
 			set_rvalue(redis_database, pairing_info, pair_devinfo)
+			devlocklist[pairing_info].release()
                         
-			devinfo=get_rvalue(redis_database, device_name)			
-
-                        devinfo[devlist_lock].acquire()
+                        devlocklist[device_name].acquire()
+			devinfo=get_rvalue(redis_database, device_name)
                         devinfo[devlist_connected] = True
-                        devinfo.append(Queue.Queue(5))
-                        devinfo[devlist_lock].release()
 			set_rvalue(redis_database, device_name, devinfo)
+                        devlocklist[device_name].release()
                         
                     else:
                         print "Some error in devicelist: [name mismatching]"
                     
-                response = "{0} registered as {1}" .format(device_name, devicenumber)
+                response = "{0} registered as {1}" .format(device_name, c_devicenumber)
             else:
                 response = "{0} has already been registered.".format(device_name)
         
@@ -93,8 +92,8 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                 color = paralist[3]
                 brightness = paralist[4]
                          
-            if sender_number in devicenumber_index:
-                sender_name = devicenumber_index[sender_number]
+            if redis_database.exists("devicenumber_index:{0}".format(sender_number)):
+                sender_name = redis_database.get("devicenumber_index:{0}".format(sender_number))
 
                 if redis_database.exists(sender_name):
 
@@ -106,11 +105,14 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                         and pair_devinfo[devlist_connected] == True:
                         
                             'Response'    
-                            try:
-                                response = devinfo[devlist_queue].get(False)
-                                devinfo[devlist_queue].task_done()
-                            except Queue.Empty:
-                                response = "No message this time"
+                            if sender_name in queue_list:
+			        try:
+                                    response = queue_list[sender_name].get(False)
+                                    queue_list[sender_name].task_done()
+                                except Queue.Empty:
+                                    response = "No message this time"
+			    else:
+				response = "It has no queue yet.."
                                 
                             response = sender_name + ": " + response
                         
@@ -123,8 +125,11 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                                 print "error code"                                                          
                             # print"operation:", operation
                             
+			    if devinfo[devlist_pairinfo] not in queue_list:
+				queue_list[devinfo[devlist_pairinfo]] = Queue.Queue(5)
+
                             try:
-                                pair_devinfo[devlist_queue].put(operation, False)
+                                queue_list[devinfo[devlist_pairinfo]].put(operation, False)
                             except Queue.Full:
                                 print "The queue is full, try again later"
 			
@@ -145,18 +150,22 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
             return (sender_name, response)
         elif paralist[0] == "N":
             sender_number = int(paralist[1])
-            if sender_number in devicenumber_index:
-                sender_name = devicenumber_index[sender_number]
+            if redis_database.exists("devicenumber_index:{0}".format(sender_number)):
+                sender_name = redis_database.get("devicenumber_index:{0}".format(sender_number))
 
                 if redis_database.exists(sender_name):
 		    
                     devinfo=get_rvalue(redis_database, sender_name)                  
                     'Response'    
-                    try:
-                        response = devinfo[devlist_queue].get(False)
-                        devinfo[devlist_queue].task_done()
-                    except Queue.Empty:
-                        response = "No message this time"
+                    
+		    if sender_name in queue_list:
+		        try:
+                            response = queue_list[sender_name].get(False)
+                            queue_list[sender_name].task_done()
+                        except Queue.Empty:
+                            response = "No message this time"
+		    else:
+			response = "It has no queue yet.."
                                 
                     response = sender_name + ": " + response
 		    set_rvalue(redis_database, sender_name, devinfo)                   
@@ -190,7 +199,7 @@ class ThreadedTCPRequestHandler(SocketServer.BaseRequestHandler):
                 else:
                     self.__devicename[0], response = self.process(data)
                     handle_alivesignal(self.__devicename[0])
-                    print "request processed."
+                    # print "request processed."
                     self.request.sendall(response)
             except socket.timeout as e:
                 if self.__devicename[0] is not "default":
@@ -210,7 +219,7 @@ def handle_alivesignal(devicename):
     if redis_database.exists(devicename):
 
         devinfo = get_rvalue(redis_database, devicename)    
-        devinfo[devlist_lock].acquire()
+        devlocklist[devicename].acquire()
         if devinfo[devlist_isalive] == False:
             devinfo[devlist_isalive] = True
             if redis_database.exists(devinfo[devlist_pairinfo]):
@@ -224,7 +233,7 @@ def handle_alivesignal(devicename):
 	        set_rvalue(redis_database, devinfo[devlist_pairinfo], pair_devinfo)
             else:
                 print "Cannot reconnect: the pair info is not recorded."
-        devinfo[devlist_lock].release()
+        devlocklist[devicename].release()
         set_rvalue(redis_database, devicename, devinfo)
     else:
 	print "Cannot make alive: because the device name doesn't exist!"
@@ -234,22 +243,29 @@ def client_die(devicename):
     if redis_database.exists(devicename):
 	
         devinfo = get_rvalue(redis_database, devicename)    
-        devinfo[devlist_lock].acquire()   
+        devlocklist[devicename].acquire()   
         if redis_database.exists(devinfo[devlist_pairinfo]):
 
 	    pair_devinfo = get_rvalue(redis_database, devinfo[devlist_pairinfo])
             devinfo[devlist_connected] = False
             pair_devinfo[devlist_connected] = False
             try:
-                devinfo[devlist_queue].clear()
-                pair_devinfo[devlist_queue].clear()
+                if devicename in queue_list:
+		    queue_list[devicename].clear()
+		else:
+		    print "Cannot clear: " + devicename + " has no queue."
+		
+		if devinfo[devlist_pairinfo] in queue_list:
+                    queue_list[devinfo[devlist_pairinfo]].clear()
+		else:
+		    print "Cannot clear: " + devinfo[devlist_pairinfo] + " has no queue."
             except Queue.Empty:
                 print "This queue is already empty, no need to clear."
 	    set_rvalue(redis_database, devinfo[devlist_pairinfo], pair_devinfo)
         else:
             print "Warning: missing the pair information, cannot make it disconnected, die alone"
         devinfo[devlist_isalive] = False
-        devinfo[devlist_lock].release()
+        devlocklist[devicename].release()
         set_rvalue(redis_database, devicename, devinfo)
         # May include another timer to indicate when to clear the long-dead device record
     else:
