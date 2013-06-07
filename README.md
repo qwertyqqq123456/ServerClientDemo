@@ -1,4 +1,4 @@
-ServerClientDemo
+ServerClientDemo (with Redis as in mem database)
 ================
 server client demo
 This project is for building the server demo version 
